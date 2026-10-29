@@ -68,10 +68,11 @@ jobs:
 
       - name: Pack boot.img
         run: |
-          curl -fsSL -o mkbootimg.py \
-            https://raw.githubusercontent.com/LineageOS/android_system_tools_mkbootimg/lineage-22.2/mkbootimg.py
+          # mkbootimg.py imports the in-repo `gki` package, so clone the tool.
+          git clone --depth 1 --branch lineage-22.2 \
+            https://github.com/LineageOS/android_system_tools_mkbootimg mkbootimg
           mkdir -p artifact
-          python3 mkbootimg.py \
+          python3 mkbootimg/mkbootimg.py \
             --header_version 2 --pagesize 4096 \
             --kernel linux/arch/arm64/boot/Image \
             --ramdisk initramfs.cpio.gz \
