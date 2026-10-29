@@ -11,9 +11,12 @@ supported devices.
 
 ## Status
 
-**M0 scaffolding — nothing has been booted yet.** The first milestone is a
-mainline kernel that comes up to a shell over USB (initramfs only, no storage,
-no display). See [`docs/PLAN.md`](docs/PLAN.md).
+**M0 builds, not yet booted.** CI compiles mainline v6.12 with our umi device
+tree, packs a busybox initramfs and produces `boot-umi-mainline.img`
+(header v2 / 4096-byte pages, the layout the LineageOS image on this device
+already uses). The device tree compiles cleanly against mainline, which is the
+first real result. Next step is flashing it and looking for the USB console.
+See [`docs/PLAN.md`](docs/PLAN.md).
 
 ## Why this is possible at all
 

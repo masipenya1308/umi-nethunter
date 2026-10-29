@@ -18,7 +18,7 @@ Phosh, no Android HALs. Staged so that every step is testable and reversible.
 
 ## Milestones
 
-### M0 — mainline boots to a shell over USB
+### M0 — mainline boots to a shell over USB  (built, not yet tested on device)
 
 Scope: `Image` + `sm8250-xiaomi-umi.dtb` + busybox initramfs, packed into
 `boot.img`. No storage, no display, no PMIC regulators beyond what the
