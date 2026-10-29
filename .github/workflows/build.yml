@@ -53,7 +53,9 @@ jobs:
           # merge_config.sh writes ./.config, so run it from inside the tree.
           ( cd linux && scripts/kconfig/merge_config.sh -m .config ../configs/umi-m0.config )
           make -C linux ARCH=$ARCH CROSS_COMPILE=$CROSS_COMPILE olddefconfig
-          for opt in CONFIG_USB_DWC3 CONFIG_PHY_QCOM_USB_SNPS_FEMTO_V2 CONFIG_USB_CONFIGFS_ACM; do
+          for opt in CONFIG_USB_DWC3 CONFIG_PHY_QCOM_USB_SNPS_FEMTO_V2 \
+                     CONFIG_USB_CONFIGFS_ACM CONFIG_FB_SIMPLE \
+                     CONFIG_FRAMEBUFFER_CONSOLE; do
             grep -q "^$opt=y" linux/.config || { echo "::error::$opt is not enabled"; exit 1; }
           done
 
@@ -72,15 +74,19 @@ jobs:
           git clone --depth 1 --branch lineage-22.2 \
             https://github.com/LineageOS/android_system_tools_mkbootimg mkbootimg
           mkdir -p artifact
+          # --base 0 is mandatory: mkbootimg defaults to 0x10000000 and the
+          # resulting load addresses are what made the first two attempts fall
+          # back to fastboot. These offsets are the ones the working image uses.
           python3 mkbootimg/mkbootimg.py \
-            --header_version 2 --pagesize 4096 \
+            --header_version 2 --pagesize 4096 --base 0 \
             --kernel linux/arch/arm64/boot/Image \
             --ramdisk initramfs.cpio.gz \
             --dtb linux/arch/arm64/boot/dts/qcom/sm8250-xiaomi-umi.dtb \
-            --cmdline "loglevel=8 init=/init panic=10" \
-            --os_version 11.0.0 --os_patch_level 2024-01 \
+            --cmdline "console=tty0 loglevel=8 init=/init panic=10" \
             --output artifact/boot-umi-mainline.img
           cp linux/arch/arm64/boot/dts/qcom/sm8250-xiaomi-umi.dtb artifact/
+          # Sanity check the header: base 0 gives exactly these addresses.
+          python3 -c "import struct,sys; b=open('artifact/boot-umi-mainline.img','rb').read(); got=(struct.unpack_from('<I',b,12)[0],struct.unpack_from('<I',b,20)[0],struct.unpack_from('<I',b,32)[0],struct.unpack_from('<Q',b,1652)[0]); print('load addresses:',[hex(x) for x in got]); sys.exit(0 if got==(0x8000,0x1000000,0x100,0x1f00000) else 1)"
           ls -lh artifact
           sha256sum artifact/*
 

@@ -32,7 +32,23 @@ Deliverables:
 Success: `dmesg` and a shell appear on the PC's COM port.
 
 Known risks: `gcc` clock controller not coming up without RPMh votes; dwc3
-needing the QMP PHY even in HS mode; the bootloader refusing a v2 image.
+needing the QMP PHY even in HS mode.
+
+Findings from the first attempts (2026-10-29):
+
+* `fastboot boot` is **not supported** by this ABL: it answers
+  `Failed to load/authenticate boot image: Load Error` even for the known-good
+  Droidian image. Every test therefore has to `fastboot flash boot`.
+* `mkbootimg` defaults to `--base 0x10000000`; the resulting load addresses
+  (0x10008000/...) make the device fall back to fastboot. `--base 0` is
+  mandatory (0x8000 / 0x1000000 / 0x100 / 0x1f00000).
+* The DT in `boot.img` must carry `qcom,msm-id = <356 0x10000>` and
+  `qcom,board-id = <43 0>`, otherwise ABL has nothing to match the device
+  against and drops back to fastboot. Both values were extracted from the
+  downstream tree (`kona.dtsi`, `umi-overlay.dts`) and the stock `dtbo.img`.
+* The working Droidian image carries a 1.4 MB vendor QCDT in the `dtb` field.
+  If a plain DTB is still refused, the next thing to try is packing our DTB
+  into the QCDT container (`magic "QCDT"`, one entry with the ids above).
 
 ### M1 — storage
 

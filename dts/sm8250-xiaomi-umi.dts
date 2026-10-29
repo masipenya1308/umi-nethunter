@@ -2,14 +2,13 @@
 /*
  * Xiaomi Mi 10 (umi) - SM8250
  *
- * M0 bring-up tree: just enough to boot a mainline kernel into an initramfs
- * with a USB CDC-ACM console. No storage, no display, no PMIC regulators -
- * everything the bootloader leaves powered stays powered.
+ * M0 bring-up tree: enough to boot a mainline kernel into an initramfs with a
+ * USB CDC-ACM console, plus a simple-framebuffer on the bootloader's splash so
+ * that early kernel messages are visible on the panel. No storage, no PMIC
+ * regulators - everything the bootloader leaves powered stays powered.
  *
  * Derived from mainline sm8250.dtsi / sm8250-xiaomi-elish-common.dtsi and the
  * downstream LineageOS device tree for umi.
- *
- * UNTESTED. See docs/PLAN.md.
  */
 
 /dts-v1/;
@@ -23,6 +22,15 @@
 	compatible = "xiaomi,umi", "qcom,sm8250";
 
 	/*
+	 * The bootloader matches boot.img's DT against these. Without them it
+	 * refuses to boot and drops back to fastboot (observed).
+	 * msm-id 356 / 0x10000 = SM8250 "kona", board-id 43 = umi
+	 * (from the downstream tree and the stock dtbo).
+	 */
+	qcom,msm-id = <356 0x10000>;
+	qcom,board-id = <43 0>;
+
+	/*
 	 * 2 GiB of the installed 6/8/12 GiB. M0 needs almost nothing, and this
 	 * range is present on every umi variant.
 	 */
@@ -33,9 +41,33 @@
 };
 
 /*
- * USB1 in peripheral mode: this is the console. The bootloader has already
- * set up the PHY rails, so only the HS PHY is described here (no QMP/USB3,
- * no PMIC supplies).
+ * Where the bootloader leaves its splash. Reserved so the allocator does not
+ * hand it out, but mapped, because a simple-framebuffer points at it.
+ */
+&{/reserved-memory} {
+	cont_splash_mem: splash@9c000000 {
+		reg = <0x0 0x9c000000 0x0 0x2300000>;
+	};
+};
+
+&{/chosen} {
+	#address-cells = <2>;
+	#size-cells = <2>;
+	ranges;
+
+	framebuffer@9c000000 {
+		compatible = "simple-framebuffer";
+		reg = <0x0 0x9c000000 0x0 0x2300000>;
+		width = <1080>;
+		height = <2340>;
+		stride = <4320>;
+		format = "a8r8g8b8";
+	};
+};
+
+/*
+ * USB1 in peripheral mode: this is the console. The bootloader has already set
+ * up the PHY rails, so only the HS PHY is described (no QMP/USB3, no supplies).
  */
 &usb_1 {
 	status = "okay";
