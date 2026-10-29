@@ -52,7 +52,7 @@ jobs:
           make -C linux ARCH=$ARCH CROSS_COMPILE=$CROSS_COMPILE defconfig
           linux/scripts/kconfig/merge_config.sh -m linux/.config configs/umi-m0.config
           make -C linux ARCH=$ARCH CROSS_COMPILE=$CROSS_COMPILE olddefconfig
-          for opt in CONFIG_USB_DWC3 CONFIG_PHY_QCOM_SNPS_EUSB2 CONFIG_USB_CONFIGFS_ACM; do
+          for opt in CONFIG_USB_DWC3 CONFIG_PHY_QCOM_SNPS_FEMTO_V2 CONFIG_USB_CONFIGFS_ACM; do
             grep -q "^$opt=y" linux/.config || { echo "::error::$opt is not enabled"; exit 1; }
           done
 
