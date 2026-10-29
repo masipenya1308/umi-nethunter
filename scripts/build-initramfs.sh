@@ -27,10 +27,10 @@ bb=$(find "$root" -type f -name busybox -print -quit)
 for d in bin sbin lib lib64; do
 	[ -L "$root/$d" ] && rm -f "$root/$d"
 done
-rm -rf "$root/usr" "$root/etc" "$root/sbin"
 
 mkdir -p "$root"/proc "$root"/sys "$root"/dev "$root"/tmp "$root"/bin
 cp "$bb" "$root/bin/busybox"
+rm -rf "$root/usr" "$root/etc" "$root/sbin"
 cp "$here/init" "$root/init"
 chmod 0755 "$root/init" "$root/bin/busybox"
 
