@@ -1,0 +1,53 @@
+// SPDX-License-Identifier: GPL-2.0-only
+/*
+ * Xiaomi Mi 10 (umi) - SM8250
+ *
+ * M0 bring-up tree: just enough to boot a mainline kernel into an initramfs
+ * with a USB CDC-ACM console. No storage, no display, no PMIC regulators -
+ * everything the bootloader leaves powered stays powered.
+ *
+ * Derived from mainline sm8250.dtsi / sm8250-xiaomi-elish-common.dtsi and the
+ * downstream LineageOS device tree for umi.
+ *
+ * UNTESTED. See docs/PLAN.md.
+ */
+
+/dts-v1/;
+
+#include <dt-bindings/gpio/gpio.h>
+#include <dt-bindings/interrupt-controller/arm-gic.h>
+#include "sm8250.dtsi"
+
+/ {
+	model = "Xiaomi Mi 10 (umi)";
+	compatible = "xiaomi,umi", "qcom,sm8250";
+
+	/*
+	 * 2 GiB of the installed 6/8/12 GiB. M0 needs almost nothing, and this
+	 * range is present on every umi variant.
+	 */
+	memory@80000000 {
+		device_type = "memory";
+		reg = <0x0 0x80000000 0x0 0x80000000>;
+	};
+};
+
+/*
+ * USB1 in peripheral mode: this is the console. The bootloader has already
+ * set up the PHY rails, so only the HS PHY is described here (no QMP/USB3,
+ * no PMIC supplies).
+ */
+&usb_1 {
+	status = "okay";
+};
+
+&usb_1_dwc3 {
+	dr_mode = "peripheral";
+	maximum-speed = "high-speed";
+	phys = <&usb_1_hsphy>;
+	phy-names = "usb2-phy";
+};
+
+&usb_1_hsphy {
+	status = "okay";
+};

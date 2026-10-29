@@ -1,0 +1,91 @@
+name: Mainline boot.img (umi, M0)
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+
+concurrency:
+  group: umi-nethunter-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  KERNEL_REF: v6.12
+  ARCH: arm64
+  CROSS_COMPILE: aarch64-linux-gnu-
+
+jobs:
+  build:
+    name: Image + dtb + initramfs -> boot.img
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu \
+            build-essential bc bison flex libssl-dev libelf-dev \
+            device-tree-compiler cpio gzip xz-utils python3
+          aarch64-linux-gnu-gcc --version | head -1
+
+      - name: Fetch kernel
+        run: |
+          git clone --depth 1 --branch "$KERNEL_REF" \
+            https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git linux
+          git -C linux rev-parse HEAD
+
+      - name: Add the umi device tree
+        run: |
+          cp dts/sm8250-xiaomi-umi.dts linux/arch/arm64/boot/dts/qcom/
+          echo 'dtb-$(CONFIG_ARCH_QCOM) += sm8250-xiaomi-umi.dtb' \
+            >> linux/arch/arm64/boot/dts/qcom/Makefile
+
+      - name: Configure
+        run: |
+          make -C linux ARCH=$ARCH CROSS_COMPILE=$CROSS_COMPILE defconfig
+          linux/scripts/kconfig/merge_config.sh -m linux/.config configs/umi-m0.config
+          make -C linux ARCH=$ARCH CROSS_COMPILE=$CROSS_COMPILE olddefconfig
+          for opt in CONFIG_USB_DWC3 CONFIG_PHY_QCOM_SNPS_EUSB2 CONFIG_USB_CONFIGFS_ACM; do
+            grep -q "^$opt=y" linux/.config || { echo "::error::$opt is not enabled"; exit 1; }
+          done
+
+      - name: Build
+        run: |
+          make -C linux -j"$(nproc)" ARCH=$ARCH CROSS_COMPILE=$CROSS_COMPILE Image dtbs
+          ls -l linux/arch/arm64/boot/Image \
+                linux/arch/arm64/boot/dts/qcom/sm8250-xiaomi-umi.dtb
+
+      - name: Build initramfs
+        run: bash scripts/build-initramfs.sh "$PWD/initramfs.cpio.gz"
+
+      - name: Pack boot.img
+        run: |
+          curl -fsSL -o mkbootimg.py \
+            https://raw.githubusercontent.com/LineageOS/android_system_tools_mkbootimg/lineage-22.2/mkbootimg.py
+          mkdir -p artifact
+          python3 mkbootimg.py \
+            --header_version 2 --pagesize 4096 \
+            --kernel linux/arch/arm64/boot/Image \
+            --ramdisk initramfs.cpio.gz \
+            --dtb linux/arch/arm64/boot/dts/qcom/sm8250-xiaomi-umi.dtb \
+            --cmdline "loglevel=8 init=/init panic=10" \
+            --os_version 11.0.0 --os_patch_level 2024-01 \
+            --output artifact/boot-umi-mainline.img
+          cp linux/arch/arm64/boot/dts/qcom/sm8250-xiaomi-umi.dtb artifact/
+          ls -lh artifact
+          sha256sum artifact/*
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: umi-nethunter-m0
+          path: artifact/*
+          if-no-files-found: error
+          retention-days: 30

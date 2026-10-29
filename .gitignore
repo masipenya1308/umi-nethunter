@@ -1,0 +1,6 @@
+/linux/
+/out/
+/artifact/
+/initramfs.cpio.gz
+/mkbootimg.py
+*.tar.gz
