@@ -18,7 +18,19 @@ curl -fsSL -o "$work/busybox.deb" "$base$deb"
 dpkg-deb -x "$work/busybox.deb" "$work/root"
 
 root="$work/root"
-mkdir -p "$root"/proc "$root"/sys "$root"/dev "$root"/tmp
+
+# The package installs into /usr/bin (trixie merged-usr), so find it instead of
+# assuming a path.
+bb=$(find "$root" -type f -name busybox -print -quit)
+[ -n "$bb" ] || { echo "busybox binary not found in $deb" >&2; exit 1; }
+
+for d in bin sbin lib lib64; do
+	[ -L "$root/$d" ] && rm -f "$root/$d"
+done
+rm -rf "$root/usr" "$root/etc" "$root/sbin"
+
+mkdir -p "$root"/proc "$root"/sys "$root"/dev "$root"/tmp "$root"/bin
+cp "$bb" "$root/bin/busybox"
 cp "$here/init" "$root/init"
 chmod 0755 "$root/init" "$root/bin/busybox"
 
