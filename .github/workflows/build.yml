@@ -53,7 +53,7 @@ jobs:
           # merge_config.sh writes ./.config, so run it from inside the tree.
           ( cd linux && scripts/kconfig/merge_config.sh -m .config ../configs/umi-m0.config )
           make -C linux ARCH=$ARCH CROSS_COMPILE=$CROSS_COMPILE olddefconfig
-          for opt in CONFIG_USB_DWC3 CONFIG_PHY_QCOM_SNPS_FEMTO_V2 CONFIG_USB_CONFIGFS_ACM; do
+          for opt in CONFIG_USB_DWC3 CONFIG_PHY_QCOM_USB_SNPS_FEMTO_V2 CONFIG_USB_CONFIGFS_ACM; do
             grep -q "^$opt=y" linux/.config || { echo "::error::$opt is not enabled"; exit 1; }
           done
 
