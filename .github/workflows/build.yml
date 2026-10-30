@@ -64,7 +64,8 @@ jobs:
           grep '^CONFIG_INITRAMFS_SOURCE' linux/.config
           for opt in CONFIG_USB_DWC3 CONFIG_PHY_QCOM_USB_SNPS_FEMTO_V2 \
                      CONFIG_USB_CONFIGFS_ACM CONFIG_QCOM_PDC CONFIG_QCOM_RPMHPD \
-                     CONFIG_INTERCONNECT_QCOM_SM8250 CONFIG_REGULATOR_FIXED_VOLTAGE; do
+                     CONFIG_INTERCONNECT_QCOM_SM8250 CONFIG_REGULATOR_FIXED_VOLTAGE \
+                     CONFIG_TYPEC_QCOM_PMIC CONFIG_TYPEC_TCPM CONFIG_QCOM_WDT; do
             grep -q "^$opt=y" linux/.config || { echo "::error::$opt is not enabled"; exit 1; }
           done
 
