@@ -20,7 +20,9 @@
 #include <dt-bindings/gpio/gpio.h>
 #include <dt-bindings/interrupt-controller/arm-gic.h>
 #include <dt-bindings/regulator/qcom,rpmh-regulator.h>
+#include <dt-bindings/usb/pd.h>
 #include "sm8250.dtsi"
+#include "pm8150b.dtsi"
 
 / {
 	model = "Xiaomi Mi 10 (umi)";
@@ -46,27 +48,76 @@
 };
 
 /*
- * USB1 in device/OTG mode: this is the console. HS PHY for USB2, QMP PHY
- * present but unused (USB3 not needed for a console).
+ * USB1 in device/OTG mode: this is the console. HS PHY for USB2, no QMP PHY
+ * (USB3 is not needed for a console, and `qcom,select-utmi-as-pipe-clk` lets
+ * dwc3 use the UTMI clock as its PIPE clock instead - without it dwc3 has no
+ * pipe clock at all and its core soft reset never completes, which looks
+ * exactly like "gadget bound, UDC never attached").
  *
- * As on elish: dr_mode "otg" with usb-role-switch lets dwc3 behave as a
- * peripheral when the host connects. The QMP PHY is registered as a second
- * phy because dwc3 on SM8250 expects both usb2-phy and usb3-phy entries.
+ * This is elish's configuration verbatim: dr_mode "otg" plus usb-role-switch,
+ * with the PM8150B Type-C controller (TCPM) as the role provider. That is not
+ * optional decoration - on this PMIC the Type-C block owns the CC/VBUS state
+ * machine, so without it nothing ever tells dwc3 that a cable is in and the
+ * D+ pull-up is never applied.
  */
 &usb_1 {
+	qcom,select-utmi-as-pipe-clk;
 	status = "okay";
 };
 
 &usb_1_dwc3 {
-	dr_mode = "peripheral";
+	dr_mode = "otg";
 	maximum-speed = "high-speed";
 	phys = <&usb_1_hsphy>;
 	phy-names = "usb2-phy";
+	usb-role-switch;
 	/* PHY quirks elish needs for a stable link */
 	snps,dis_u2_susphy_quirk;
 	snps,dis_enblslpm_quirk;
 	snps,dis-u1-entry-quirk;
 	snps,dis-u2-entry-quirk;
+};
+
+&usb_1_dwc3_hs_out {
+	remote-endpoint = <&pm8150b_hs_in>;
+};
+
+&pm8150b_typec {
+	vdd-pdphy-supply = <&vreg_l2a_3p1>;
+	status = "okay";
+
+	connector {
+		compatible = "usb-c-connector";
+
+		op-sink-microwatt = <10000000>;
+		power-role = "dual";
+		data-role = "dual";
+		self-powered;
+
+		source-pdos = <PDO_FIXED(5000, 3000,
+					 PDO_FIXED_DUAL_ROLE |
+					 PDO_FIXED_USB_COMM |
+					 PDO_FIXED_DATA_SWAP)>;
+
+		sink-pdos = <PDO_FIXED(5000, 3000,
+				       PDO_FIXED_DUAL_ROLE |
+				       PDO_FIXED_USB_COMM |
+				       PDO_FIXED_DATA_SWAP)
+				       PDO_VAR(5000, 12000, 5000)>;
+
+		ports {
+			#address-cells = <1>;
+			#size-cells = <0>;
+
+			port@0 {
+				reg = <0>;
+
+				pm8150b_hs_in: endpoint {
+					remote-endpoint = <&usb_1_dwc3_hs_out>;
+				};
+			};
+		};
+	};
 };
 
 &usb_1_hsphy {

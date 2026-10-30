@@ -1,23 +1,30 @@
 #!/bin/sh
 # initramfs /init for M0: bring up a USB CDC-ACM gadget and hand a shell to it.
 #
-# There is no UART on this phone, so this is the only console we have. Two
-# rules, both learned the hard way:
+# There is no UART on this phone, so this is the only console we have. Three
+# rules, all learned the hard way:
 #
 #  1. PID 1 must never exit. If it does the kernel panics with "Attempted to
 #     kill init" and reboot-loops, which is exactly as blind as a hang.
 #  2. When there is no console, the phone itself has to report. It does that
 #     with the only output it has - the time between reboots.
+#  3. `echo <udc> > UDC` is not enough. usb_udc_connect_control() only calls
+#     usb_gadget_connect() when udc->vbus is true, and nothing on this board
+#     ever reports VBUS (no extcon, no role switch, no Type-C driver). The
+#     gadget then binds, /dev/ttyGS0 exists, and the D+ pull-up is never
+#     applied: UDC state stays "not attached" and the host sees nothing.
+#     soft_connect is the direct lever that skips that check.
 #
-# Timing codes (watch the Xiaomi logo and count the seconds):
+# Timing codes, counted from the moment the kernel takes over (the Xiaomi logo
+# stays on screen for the whole time, so count until the phone goes dark):
 #
-#   ~20 s   dwc3 never probed: /sys/class/udc is empty
-#   ~40 s   UDC exists but the gadget did not bind / no /dev/ttyGS0
-#   never   the gadget is up; the phone stays on because USB should now be
-#           visible on the host
+#   ~8 s    dwc3 never probed: /sys/class/udc is empty
+#   ~20 s   UDC exists but no /dev/ttyGS0 (gadget failed to bind)
+#   ~35 s   ttyGS0 exists, UDC state still not attached (PHY/pull-up problem)
+#   ~50 s   state "attached" but the host never configured us
+#   never   the gadget is up: the phone stays on, USB should be visible
 #
-# A panic before /init looks different again: about 15 s, because panic=10 adds
-# ten seconds to a normal boot.
+# A panic before /init looks different again: about 10 s plus the panic timeout.
 
 export PATH=/bin
 
@@ -48,13 +55,32 @@ gadget_create() {
 	ln -sf "$G/functions/acm.usb0" "$G/configs/c.1/acm.usb0"
 }
 
-# Bind the gadget once a UDC exists. dwc3 may probe late, so this is retried.
-gadget_bind() {
+udc_name() {
+	ls /sys/class/udc 2>/dev/null | head -1
+}
+
+# Bind the gadget and then force the pull-up, which is what actually puts us on
+# the bus. Returns 0 if the controller reports "configured".
+gadget_up() {
 	gadget_create || return 1
-	[ -n "$(cat "$G/UDC" 2>/dev/null)" ] && return 0
-	udc=$(ls /sys/class/udc 2>/dev/null | head -1)
+	udc=$(udc_name)
 	[ -n "$udc" ] || return 1
-	echo "$udc" > "$G/UDC"
+
+	if [ "$(cat "$G/UDC" 2>/dev/null)" != "$udc" ]; then
+		echo "$udc" > "$G/UDC" 2>/dev/null
+	fi
+
+	# The direct lever: usb_gadget_connect() without the vbus check.
+	if [ -w "/sys/class/udc/$udc/soft_connect" ]; then
+		echo connect > "/sys/class/udc/$udc/soft_connect" 2>/dev/null
+	fi
+	# Harmless if it does not exist; some kernels expose it.
+	[ -w "/sys/class/udc/$udc/vbus" ] && echo 1 > "/sys/class/udc/$udc/vbus" 2>/dev/null
+
+	case "$(cat "/sys/class/udc/$udc/state" 2>/dev/null)" in
+		*configured*) return 0 ;;
+	esac
+	return 1
 }
 
 die_in() {
@@ -66,18 +92,31 @@ die_in() {
 	sleep 10
 }
 
-n=0
-udc_seen=0
+# One bind attempt, one forced reconnect, then measure. dwc3 probes late on
+# this board, so the UDC list can be empty on the very first pass.
+i=0
+while [ "$i" -lt 10 ]; do
+	i=$((i + 1))
+	gadget_up && break
+	sleep 1
+done
 
-while true; do
-	n=$((n + 1))
+udc=$(udc_name)
+state=$(cat "/sys/class/udc/$udc/state" 2>/dev/null)
 
-	if gadget_bind && [ -c /dev/ttyGS0 ]; then
-		echo "umi-m0: console up on $(cat "$G/UDC" 2>/dev/null)" \
-			> /dev/kmsg 2>/dev/null
-		# Child, not exec: if the host closes the port the shell exits and
-		# the loop just spawns a new one.
-		setsid sh -c '
+# Everything we know, in one place, for whoever eventually reads a log.
+{
+	echo "umi-m0: udc=[$udc] state=[$state] tty=$([ -c /dev/ttyGS0 ] && echo yes || echo no)"
+	dmesg | grep -i -E "dwc3|usb_1|hsphy|phy|udc|gadget" | tail -40
+} > /dev/kmsg 2>/dev/null
+
+if [ -c /dev/ttyGS0 ]; then
+	echo "umi-m0: console up on $(udc_name)" > /dev/kmsg 2>/dev/null
+	# Foreground on purpose: the shell owns the port, and PID 1 stays alive
+	# waiting for it. If the host closes the port, the shell exits and a new
+	# one is spawned.
+	while true; do
+		sh -c '
 			dmesg
 			echo
 			echo "=== umi mainline M0 shell ==="
@@ -86,18 +125,21 @@ while true; do
 			echo
 			exec sh
 		' </dev/ttyGS0 >/dev/ttyGS0 2>&1
-		continue
-	fi
+		sleep 1
+	done
+fi
 
-	if [ -n "$(ls /sys/class/udc 2>/dev/null)" ]; then
-		udc_seen=1
-	fi
+if [ -z "$udc" ]; then
+	die_in 8           # dwc3 never probed
+elif [ ! -c /dev/ttyGS0 ]; then
+	die_in 20          # no gadget
+else
+	case "$state" in
+		*configured*|*addressed*) die_in 50 ;;
+		*attached*)               die_in 50 ;;
+		*)                        die_in 35 ;;
+	esac
+fi
 
-	if [ "$udc_seen" = 1 ]; then
-		[ "$n" -ge 13 ] && die_in 1      # ~40 s from start
-	else
-		[ "$n" -ge 7 ] && die_in 1       # ~21 s from start
-	fi
-
-	sleep 3
-done
+# die_in always ends in a reboot, but never fall through into a panic.
+while true; do sleep 60; done
