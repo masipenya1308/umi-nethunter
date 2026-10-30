@@ -45,6 +45,57 @@
 		device_type = "memory";
 		reg = <0x0 0x80000000 0x0 0x80000000>;
 	};
+
+	/*
+	 * The bootloader leaves the panel scanning out of cont_splash_region at
+	 * 0x9c000000, and nothing in mainline touches MDSS - so that surface is
+	 * still live. Describing it as a simple-framebuffer gives us a text
+	 * console on the phone itself, with no DSI driver, no DPU and no DRM.
+	 *
+	 * This is exactly what elish does (same SoC, same ABL splash mechanism,
+	 * same address), which is why it is worth trying before writing a panel
+	 * driver: it turns the screen into the log channel we have been missing.
+	 *
+	 * 1080x2340 is the Mi 10 panel; the region is 0x2300000 and ends exactly
+	 * where dfps_data_region starts, so it must not be rounded up.
+	 */
+	chosen {
+		#address-cells = <2>;
+		#size-cells = <2>;
+		ranges;
+
+		framebuffer@9c000000 {
+			compatible = "simple-framebuffer";
+			reg = <0x0 0x9c000000 0x0 0x2300000>;
+			width = <1080>;
+			height = <2340>;
+			stride = <(1080 * 4)>;
+			format = "a8r8g8b8";
+		};
+	};
+};
+
+&{/reserved-memory} {
+	/* The splash surface must be out of the allocator's reach. */
+	cont_splash_mem: cont-splash@9c000000 {
+		reg = <0x0 0x9c000000 0x0 0x2300000>;
+		no-map;
+	};
+
+	/*
+	 * 4 MiB at 0xb0000000 for pstore. Nothing on umi reserves this range
+	 * (checked against the stock DT's reserved-memory), and it is the same
+	 * window elish uses. With no console and no storage this is the only
+	 * place a kernel log can survive a crash: the next boot reads it from
+	 * /sys/fs/pstore, and Droidian's systemd-pstore archives it.
+	 */
+	ramoops@b0000000 {
+		compatible = "ramoops";
+		reg = <0x0 0xb0000000 0x0 0x400000>;
+		record-size = <0x1000>;
+		console-size = <0x200000>;
+		no-map;
+	};
 };
 
 /*
