@@ -59,11 +59,10 @@
 };
 
 &usb_1_dwc3 {
-	dr_mode = "otg";
+	dr_mode = "peripheral";
 	maximum-speed = "high-speed";
 	phys = <&usb_1_hsphy>, <&usb_1_qmpphy QMP_USB43DP_USB3_PHY>;
 	phy-names = "usb2-phy", "usb3-phy";
-	usb-role-switch;
 	/* PHY quirks elish needs for a stable link */
 	snps,dis_u2_susphy_quirk;
 	snps,dis_enblslpm_quirk;
