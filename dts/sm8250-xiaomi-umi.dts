@@ -54,7 +54,6 @@
  * phy because dwc3 on SM8250 expects both usb2-phy and usb3-phy entries.
  */
 &usb_1 {
-	qcom,select-utmi-as-pipe-clk;
 	status = "okay";
 };
 
