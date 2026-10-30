@@ -46,24 +46,29 @@
 };
 
 /*
- * USB1 in peripheral mode: this is the console. Only the HS PHY is described
- * (no QMP/USB3) - USB 2.0 is all a console needs.
+ * USB1 in device/OTG mode: this is the console. HS PHY for USB2, QMP PHY
+ * present but unused (USB3 not needed for a console).
  *
- * No simple-framebuffer here on purpose: the panel is a command-mode DSI AMOLED
- * and keeps showing whatever is in its own GRAM until a DSI driver feeds it, so
- * a framebuffer on the splash buffer would show nothing anyway.
+ * As on elish: dr_mode "otg" with usb-role-switch lets dwc3 behave as a
+ * peripheral when the host connects. The QMP PHY is registered as a second
+ * phy because dwc3 on SM8250 expects both usb2-phy and usb3-phy entries.
  */
 &usb_1 {
-	/* USB 2.0 only, as on elish: take the pipe clock from UTMI. */
 	qcom,select-utmi-as-pipe-clk;
 	status = "okay";
 };
 
 &usb_1_dwc3 {
-	dr_mode = "peripheral";
+	dr_mode = "otg";
 	maximum-speed = "high-speed";
-	phys = <&usb_1_hsphy>;
-	phy-names = "usb2-phy";
+	phys = <&usb_1_hsphy>, <&usb_1_qmpphy QMP_USB43DP_USB3_PHY>;
+	phy-names = "usb2-phy", "usb3-phy";
+	usb-role-switch;
+	/* PHY quirks elish needs for a stable link */
+	snps,dis_u2_susphy_quirk;
+	snps,dis_enblslpm_quirk;
+	snps,dis-u1-entry-quirk;
+	snps,dis-u2-entry-quirk;
 };
 
 &usb_1_hsphy {
@@ -71,6 +76,10 @@
 	vdda-pll-supply = <&vreg_l5a_0p88>;
 	vdda18-supply = <&vreg_l12a_1p8>;
 	vdda33-supply = <&vreg_l2a_3p1>;
+};
+
+&usb_1_qmpphy {
+	status = "okay";
 };
 
 /*
