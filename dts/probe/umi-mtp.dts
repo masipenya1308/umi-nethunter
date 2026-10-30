@@ -1,0 +1,20 @@
+// SPDX-License-Identifier: GPL-2.0-only
+/*
+ * umi, booting mainline's own SM8250 MTP board tree.
+ *
+ * This is the control experiment: sm8250-mtp is the reference board mainline
+ * is actually tested on. It gets the umi ids so the bootloader will accept it
+ * and an explicit memory node, because sm8250-mtp.dts expects the bootloader to
+ * provide one. If MTP boots and our tree does not, the bug is ours.
+ */
+#include "sm8250-mtp.dts"
+
+&{/} {
+	qcom,msm-id = <356 0x10000>;
+	qcom,board-id = <43 0>;
+
+	memory@80000000 {
+		device_type = "memory";
+		reg = <0x0 0x80000000 0x0 0x80000000>;
+	};
+};

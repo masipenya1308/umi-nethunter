@@ -1,0 +1,86 @@
+name: Device trees (fast)
+
+# Builds only device trees, no kernel. Four minutes instead of twenty five, so
+# a DT change can be bisected: the DTBs are combined with the already built
+# Image by tools/repack.py and flashed locally.
+#
+#   .\tools\repack.py out\boot-umi-mainline.img out\test.img --dtb out\umi-min.dtb
+#
+# The variants under dts/probe/ exist to answer one question: does mainline
+# reach userspace on this phone at all, before any umi-specific driver work.
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'dts/**'
+      - '.github/workflows/dtb.yml'
+
+concurrency:
+  group: umi-dtb-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  KERNEL_REF: v6.12
+  ARCH: arm64
+  CROSS_COMPILE: aarch64-linux-gnu-
+
+jobs:
+  dtb:
+    name: DTBs
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            gcc-aarch64-linux-gnu device-tree-compiler
+          dtc --version
+
+      - name: Fetch kernel
+        run: |
+          git clone --depth 1 --branch "$KERNEL_REF" \
+            https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git linux
+          git -C linux rev-parse --short HEAD
+
+      - name: Add the umi device trees
+        run: |
+          cp dts/sm8250-xiaomi-umi.dts linux/arch/arm64/boot/dts/qcom/
+          cp dts/probe/*.dts linux/arch/arm64/boot/dts/qcom/
+          cd linux/arch/arm64/boot/dts/qcom
+          for d in sm8250-xiaomi-umi umi-min umi-mtp; do
+            echo "dtb-\$(CONFIG_ARCH_QCOM) += $d.dtb" >> Makefile
+          done
+          tail -4 Makefile
+
+      - name: Configure
+        run: make -C linux ARCH=$ARCH CROSS_COMPILE=$CROSS_COMPILE defconfig
+
+      - name: Build
+        run: |
+          # Named targets first; fall back to everything if the top level does
+          # not know how to build a single dtb.
+          make -C linux -j"$(nproc)" ARCH=$ARCH CROSS_COMPILE=$CROSS_COMPILE \
+            qcom/sm8250-xiaomi-umi.dtb qcom/umi-min.dtb qcom/umi-mtp.dtb \
+            || make -C linux -j"$(nproc)" ARCH=$ARCH CROSS_COMPILE=$CROSS_COMPILE dtbs
+          mkdir -p artifact
+          for d in sm8250-xiaomi-umi umi-min umi-mtp sm8250-mtp sm8250-xiaomi-elish; do
+            src=linux/arch/arm64/boot/dts/qcom/$d.dtb
+            if [ -f "$src" ]; then
+              cp "$src" artifact/
+              echo "built $d.dtb ($(stat -c %s "$src") bytes)"
+            else
+              echo "::warning::$d.dtb was not built"
+            fi
+          done
+          ls -l artifact
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dtbs
+          path: artifact/
+          if-no-files-found: error

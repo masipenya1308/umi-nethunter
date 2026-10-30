@@ -1,0 +1,25 @@
+// SPDX-License-Identifier: GPL-2.0-only
+/*
+ * umi, minimal probe tree.
+ *
+ * Nothing is enabled beyond what sm8250.dtsi turns on by itself: no USB, no
+ * PHY, no regulators, no framebuffer. If this tree still reboot-loops, then
+ * the fault is not in the umi additions - it is in the core SoC description,
+ * the kernel config or the boot image itself.
+ */
+/dts-v1/;
+
+#include "sm8250.dtsi"
+
+/ {
+	model = "Xiaomi Mi 10 (umi, minimal probe)";
+	compatible = "xiaomi,umi", "qcom,sm8250";
+
+	qcom,msm-id = <356 0x10000>;
+	qcom,board-id = <43 0>;
+
+	memory@80000000 {
+		device_type = "memory";
+		reg = <0x0 0x80000000 0x0 0x80000000>;
+	};
+};
