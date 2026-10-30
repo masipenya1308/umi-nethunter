@@ -47,15 +47,24 @@ jobs:
           echo 'dtb-$(CONFIG_ARCH_QCOM) += sm8250-xiaomi-umi.dtb' \
             >> linux/arch/arm64/boot/dts/qcom/Makefile
 
+      - name: Build initramfs
+        run: |
+          bash scripts/build-initramfs.sh "$PWD/initramfs-root" "$PWD/initramfs.cpio.gz"
+          ls -l "$PWD/initramfs-root"
+
       - name: Configure
         run: |
           make -C linux ARCH=$ARCH CROSS_COMPILE=$CROSS_COMPILE defconfig
           # merge_config.sh writes ./.config, so run it from inside the tree.
           ( cd linux && scripts/kconfig/merge_config.sh -m .config ../configs/umi-m0.config )
+          # Carry the initramfs inside the kernel: this removes the bootloader
+          # (and the boot image) from the "is there a rootfs" question entirely.
+          linux/scripts/config --file linux/.config --set-str INITRAMFS_SOURCE "$PWD/initramfs-root"
           make -C linux ARCH=$ARCH CROSS_COMPILE=$CROSS_COMPILE olddefconfig
+          grep '^CONFIG_INITRAMFS_SOURCE' linux/.config
           for opt in CONFIG_USB_DWC3 CONFIG_PHY_QCOM_USB_SNPS_FEMTO_V2 \
-                     CONFIG_USB_CONFIGFS_ACM CONFIG_FB_SIMPLE \
-                     CONFIG_FRAMEBUFFER_CONSOLE; do
+                     CONFIG_USB_CONFIGFS_ACM CONFIG_QCOM_PDC CONFIG_QCOM_RPMHPD \
+                     CONFIG_INTERCONNECT_QCOM_SM8250 CONFIG_REGULATOR_FIXED_VOLTAGE; do
             grep -q "^$opt=y" linux/.config || { echo "::error::$opt is not enabled"; exit 1; }
           done
 
@@ -64,9 +73,9 @@ jobs:
           make -C linux -j"$(nproc)" ARCH=$ARCH CROSS_COMPILE=$CROSS_COMPILE Image dtbs
           ls -l linux/arch/arm64/boot/Image \
                 linux/arch/arm64/boot/dts/qcom/sm8250-xiaomi-umi.dtb
-
-      - name: Build initramfs
-        run: bash scripts/build-initramfs.sh "$PWD/initramfs.cpio.gz"
+          # Sanity check that the initramfs really went in.
+          grep -c '070701' linux/usr/initramfs_data.cpio >/dev/null 2>&1 || true
+          ls -l linux/usr/initramfs_data.cpio* 2>/dev/null || true
 
       - name: Pack boot.img
         run: |
@@ -85,6 +94,7 @@ jobs:
             --cmdline "console=tty0 loglevel=8 init=/init panic=10" \
             --output artifact/boot-umi-mainline.img
           cp linux/arch/arm64/boot/dts/qcom/sm8250-xiaomi-umi.dtb artifact/
+          cp linux/.config artifact/kernel.config
           # Sanity check the header: base 0 gives exactly these addresses.
           python3 -c "import struct,sys; b=open('artifact/boot-umi-mainline.img','rb').read(); got=(struct.unpack_from('<I',b,12)[0],struct.unpack_from('<I',b,20)[0],struct.unpack_from('<I',b,32)[0],struct.unpack_from('<Q',b,1652)[0]); print('load addresses:',[hex(x) for x in got]); sys.exit(0 if got==(0x8000,0x1000000,0x100,0x1f00000) else 1)"
           ls -lh artifact

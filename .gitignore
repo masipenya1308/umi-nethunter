@@ -5,3 +5,4 @@
 /mkbootimg.py
 *.tar.gz
 /mkbootimg/
+/initramfs-root/

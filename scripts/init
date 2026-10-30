@@ -1,53 +1,73 @@
 #!/bin/sh
-# initramfs /init for M0: bring up a USB CDC-ACM gadget and hand the shell to it.
-# There is no UART on this phone, so this is the only way to see anything.
+# initramfs /init for M0: bring up a USB CDC-ACM gadget and hand a shell to it.
+#
+# There is no UART on this phone, so this is the only console we have.
+#
+# PID 1 must never exit: if it does, the kernel panics with "Attempted to kill
+# init" and reboot-loops, which is exactly as blind as a hang. So everything
+# below runs in a loop and the shell is a child, never an exec.
 
 export PATH=/bin
 
 mount -t proc     proc     /proc
 mount -t sysfs    sysfs    /sys
-mount -t devtmpfs devtmpfs /dev 2>/dev/null || true
-mount -t configfs none     /sys/kernel/config 2>/dev/null || true
+mount -t devtmpfs devtmpfs /dev 2>/dev/null
+mkdir -p /dev/pts /sys/kernel/config
+mount -t devpts   devpts   /dev/pts 2>/dev/null
+mount -t configfs none     /sys/kernel/config 2>/dev/null
 
 G=/sys/kernel/config/usb_gadget/umi
-mkdir -p "$G"
-echo 0x1d6b > "$G/idVendor"
-echo 0x0104 > "$G/idProduct"
 
-mkdir -p "$G/strings/0x409"
-echo umi           > "$G/strings/0x409/serialnumber"
-echo umi-nethunter > "$G/strings/0x409/manufacturer"
-echo "umi debug console" > "$G/strings/0x409/product"
+setup_gadget() {
+	[ -d "$G" ] || {
+		mkdir -p "$G" || return 1
+		echo 0x1d6b > "$G/idVendor"
+		echo 0x0104 > "$G/idProduct"
 
-mkdir -p "$G/configs/c.1/strings/0x409"
-echo acm > "$G/configs/c.1/strings/0x409/configuration"
+		mkdir -p "$G/strings/0x409"
+		echo umi            > "$G/strings/0x409/serialnumber"
+		echo umi-nethunter  > "$G/strings/0x409/manufacturer"
+		echo "umi debug console" > "$G/strings/0x409/product"
 
-mkdir -p "$G/functions/acm.usb0"
-ln -sf "$G/functions/acm.usb0" "$G/configs/c.1/acm.usb0"
+		mkdir -p "$G/configs/c.1/strings/0x409"
+		echo acm > "$G/configs/c.1/strings/0x409/configuration"
 
-udc=$(ls /sys/class/udc 2>/dev/null | head -1)
-if [ -n "$udc" ]; then
-	echo "$udc" > "$G/UDC"
-else
-	echo "umi-m0: no UDC found" > /dev/kmsg 2>/dev/null
-fi
+		mkdir -p "$G/functions/acm.usb0"
+		ln -sf "$G/functions/acm.usb0" "$G/configs/c.1/acm.usb0"
+	}
 
-# Wait for the gadget tty to appear.
-i=0
-while [ ! -c /dev/ttyGS0 ] && [ "$i" -lt 100 ]; do
-	sleep 0.2
-	i=$((i + 1))
+	# Bind the gadget once the UDC exists. dwc3 may probe late, so this is
+	# retried from the main loop.
+	if [ -z "$(cat "$G/UDC" 2>/dev/null)" ]; then
+		udc=$(ls /sys/class/udc 2>/dev/null | head -1)
+		[ -n "$udc" ] || return 1
+		echo "$udc" > "$G/UDC" || return 1
+	fi
+	return 0
+}
+
+announced=
+
+while true; do
+	setup_gadget
+
+	if [ -c /dev/ttyGS0 ]; then
+		if [ -z "$announced" ]; then
+			announced=1
+			echo "umi-m0: gadget up, $(ls /sys/class/udc 2>/dev/null | head -1)" > /dev/kmsg 2>/dev/null
+		fi
+		# Child, not exec: if the host closes the port the shell exits and
+		# the loop just spawns a new one.
+		setsid sh -c '
+			dmesg
+			echo
+			echo "=== umi mainline M0 shell ==="
+			uname -a
+			cat /proc/cmdline
+			echo
+			exec sh
+		' </dev/ttyGS0 >/dev/ttyGS0 2>&1
+	fi
+
+	sleep 3
 done
-
-if [ -c /dev/ttyGS0 ]; then
-	exec setsid sh -c '
-		dmesg
-		echo
-		echo "=== umi mainline M0 shell ==="
-		echo "uname: $(uname -a)"
-		exec sh
-	' </dev/ttyGS0 >/dev/ttyGS0 2>&1
-fi
-
-# Nothing to talk to: stay alive so the watchdog does not reboot us.
-while true; do sleep 3600; done

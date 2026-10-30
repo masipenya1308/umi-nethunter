@@ -1,10 +1,19 @@
 #!/usr/bin/env bash
-# Build a minimal busybox initramfs with the M0 /init.
-# The busybox binary is taken from the Debian arm64 busybox-static package so
-# nothing has to be compiled (and no arm64 binary is ever executed here).
+# Build the M0 initramfs.
+#
+#   build-initramfs.sh <root-dir> [<out.cpio.gz>]
+#
+# The root directory is what CONFIG_INITRAMFS_SOURCE points at, so the kernel
+# carries its own initramfs and does not depend on the bootloader handing a
+# ramdisk over. The optional .cpio.gz is packed as the boot.img ramdisk as
+# well, which is harmless and useful for debugging.
+#
+# busybox comes from the Debian arm64 busybox-static package: nothing is
+# compiled here and no arm64 binary is ever executed.
 set -euo pipefail
 
-out=${1:-initramfs.cpio.gz}
+root=${1:?usage: build-initramfs.sh <root-dir> [out.cpio.gz]}
+out=${2:-}
 here=$(cd "$(dirname "$0")" && pwd)
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
@@ -15,22 +24,16 @@ deb=$(curl -fsSL "$base" | grep -o 'busybox-static_[^"]*_arm64\.deb' | sort -u |
 echo "busybox: $deb"
 
 curl -fsSL -o "$work/busybox.deb" "$base$deb"
-dpkg-deb -x "$work/busybox.deb" "$work/root"
+dpkg-deb -x "$work/busybox.deb" "$work/deb"
 
-root="$work/root"
-
-# The package installs into /usr/bin (trixie merged-usr), so find it instead of
+# The package installs into /usr/bin (merged-usr), so find it instead of
 # assuming a path.
-bb=$(find "$root" -type f -name busybox -print -quit)
+bb=$(find "$work/deb" -type f -name busybox -print -quit)
 [ -n "$bb" ] || { echo "busybox binary not found in $deb" >&2; exit 1; }
 
-for d in bin sbin lib lib64; do
-	[ -L "$root/$d" ] && rm -f "$root/$d"
-done
-
+rm -rf "$root"
 mkdir -p "$root"/proc "$root"/sys "$root"/dev "$root"/tmp "$root"/bin
 cp "$bb" "$root/bin/busybox"
-rm -rf "$root/usr" "$root/etc" "$root/sbin"
 cp "$here/init" "$root/init"
 chmod 0755 "$root/init" "$root/bin/busybox"
 
@@ -40,5 +43,10 @@ for a in sh mount umount mkdir echo sleep cat dmesg ls ln rm exec setsid \
 	ln -sf busybox "$root/bin/$a"
 done
 
-( cd "$root" && find . -print0 | cpio --null -o -H newc --quiet | gzip -9 ) > "$out"
-echo "wrote $out ($(stat -c %s "$out") bytes)"
+echo "root: $root"
+ls -l "$root" "$root/bin" | sed 's/^/  /'
+
+if [ -n "$out" ]; then
+	( cd "$root" && find . -print0 | cpio --null -o -H newc --quiet | gzip -9 ) > "$out"
+	echo "wrote $out ($(stat -c %s "$out") bytes)"
+fi

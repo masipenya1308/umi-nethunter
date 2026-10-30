@@ -41,33 +41,12 @@
 };
 
 /*
- * Where the bootloader leaves its splash. Reserved so the allocator does not
- * hand it out, but mapped, because a simple-framebuffer points at it.
- */
-&{/reserved-memory} {
-	cont_splash_mem: splash@9c000000 {
-		reg = <0x0 0x9c000000 0x0 0x2300000>;
-	};
-};
-
-&{/chosen} {
-	#address-cells = <2>;
-	#size-cells = <2>;
-	ranges;
-
-	framebuffer@9c000000 {
-		compatible = "simple-framebuffer";
-		reg = <0x0 0x9c000000 0x0 0x2300000>;
-		width = <1080>;
-		height = <2340>;
-		stride = <4320>;
-		format = "a8r8g8b8";
-	};
-};
-
-/*
  * USB1 in peripheral mode: this is the console. The bootloader has already set
  * up the PHY rails, so only the HS PHY is described (no QMP/USB3).
+ *
+ * No simple-framebuffer here on purpose: the panel is a command-mode DSI AMOLED
+ * and keeps showing whatever is in its own GRAM until a DSI driver feeds it, so
+ * a framebuffer on the splash buffer would show nothing anyway.
  */
 &usb_1 {
 	/* USB 2.0 only, as on elish: take the pipe clock from UTMI. */
