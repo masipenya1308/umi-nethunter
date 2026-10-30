@@ -67,9 +67,11 @@
 
 /*
  * USB1 in peripheral mode: this is the console. The bootloader has already set
- * up the PHY rails, so only the HS PHY is described (no QMP/USB3, no supplies).
+ * up the PHY rails, so only the HS PHY is described (no QMP/USB3).
  */
 &usb_1 {
+	/* USB 2.0 only, as on elish: take the pipe clock from UTMI. */
+	qcom,select-utmi-as-pipe-clk;
 	status = "okay";
 };
 
@@ -82,4 +84,40 @@
 
 &usb_1_hsphy {
 	status = "okay";
+	vdda-pll-supply = <&vreg_usb_hs_pll>;
+	vdda18-supply = <&vreg_usb_hs_1p8>;
+	vdda33-supply = <&vreg_usb_hs_3p1>;
+};
+
+/*
+ * phy-qcom-snps-femto-v2 requests all three supplies unconditionally
+ * (devm_regulator_bulk_get), so they must exist in the tree even though the
+ * bootloader already left the real PMIC LDOs on: PM8150 L5A (0.88 V),
+ * L12A (1.8 V) and L2A (3.1 V). Fixed always-on stand-ins are enough for M0;
+ * the real pm8150 regulators arrive with the M4 power work.
+ */
+/ {
+	vreg_usb_hs_pll: regulator-usb-hs-pll {
+		compatible = "regulator-fixed";
+		regulator-name = "usb_hs_pll_0p88";
+		regulator-min-microvolt = <880000>;
+		regulator-max-microvolt = <880000>;
+		regulator-always-on;
+	};
+
+	vreg_usb_hs_1p8: regulator-usb-hs-1p8 {
+		compatible = "regulator-fixed";
+		regulator-name = "usb_hs_1p8";
+		regulator-min-microvolt = <1800000>;
+		regulator-max-microvolt = <1800000>;
+		regulator-always-on;
+	};
+
+	vreg_usb_hs_3p1: regulator-usb-hs-3p1 {
+		compatible = "regulator-fixed";
+		regulator-name = "usb_hs_3p1";
+		regulator-min-microvolt = <3100000>;
+		regulator-max-microvolt = <3100000>;
+		regulator-always-on;
+	};
 };
