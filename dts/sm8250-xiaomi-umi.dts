@@ -61,8 +61,8 @@
 &usb_1_dwc3 {
 	dr_mode = "peripheral";
 	maximum-speed = "high-speed";
-	phys = <&usb_1_hsphy>, <&usb_1_qmpphy QMP_USB43DP_USB3_PHY>;
-	phy-names = "usb2-phy", "usb3-phy";
+	phys = <&usb_1_hsphy>;
+	phy-names = "usb2-phy";
 	/* PHY quirks elish needs for a stable link */
 	snps,dis_u2_susphy_quirk;
 	snps,dis_enblslpm_quirk;
@@ -75,10 +75,6 @@
 	vdda-pll-supply = <&vreg_l5a_0p88>;
 	vdda18-supply = <&vreg_l12a_1p8>;
 	vdda33-supply = <&vreg_l2a_3p1>;
-};
-
-&usb_1_qmpphy {
-	status = "okay";
 };
 
 /*
