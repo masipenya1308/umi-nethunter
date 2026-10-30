@@ -71,6 +71,9 @@ different failures looked identical for two days.
 
 Two durable fixes, in order of value:
 
+0. **The panel itself.** See "The screen is a log channel" below — the
+   bootloader's splash surface is still live and `simple-framebuffer` costs one
+   DTS node. If it works, it is a full text console with zero new drivers.
 1. **UFS (M1).** Mainline supports `ufs_mem_hc` on sm8250 and elish already
    enables it. Once UFS probes, init can `dd` dmesg onto a scratch partition
    and the host can read it with `fastboot fetch <partition>` — no USB, no
@@ -79,25 +82,52 @@ Two durable fixes, in order of value:
 2. **Reboot-timing ladder.** Cheap, already built, one number per flash. Good
    enough to bisect the chain in a handful of boots.
 
+## The screen is a log channel (found 2026-10-30, late)
+
+The panel goes dark after the MI logo, which looked like a dead display. It is
+not: nothing in mainline touches MDSS, so the bootloader's splash surface at
+**0x9c000000** (`cont_splash_region`, 0x2300000 bytes, confirmed in the stock
+DT) is still being scanned out. elish — same SoC, same ABL splash mechanism,
+same address — hands exactly that region to `simple-framebuffer` and gets a
+text console with no DSI driver, no DPU and no DRM.
+
+umi now does the same (`chosen/framebuffer@9c000000`, 1080x2340, stride 4320,
+`a8r8g8b8`), plus `ramoops` at **0xb0000000** (4 MiB, the window elish uses,
+verified free against umi's stock reserved-memory).
+
+fbdev rather than simpledrm on purpose: DRM has to stay off so that
+`TYPEC_QCOM_PMIC` can be built in (see above). `CONFIG_FB_SIMPLE` refuses to
+build alongside `DRM_SIMPLEDRM`, which costs nothing here.
+
+If the panel is live, the whole dmesg is on the phone's screen about a second
+into boot and this document's "why we are blind" section stops applying.
+
 ## Next experiment — ready to flash
 
-`out/t17-ladder.img` (built from the `m0-d23d340` kernel + DTB, only `/init`
-replaced). Flash it, boot it, and time the first reboot:
+**`out/t18-screen.img`** — kernel `765a7ae` (fbcon + pstore + TCPM + WDT), DTB
+with the framebuffer and ramoops, and an init that reports, waits 60 s so the
+screen can be photographed, and only then reboots with a code.
 
 ```bash
-fastboot flash boot D:\umi\work\umi-nethunter\out\t17-ladder.img
+fastboot flash boot D:\umi\work\umi-nethunter\out\t18-screen.img
 fastboot reboot
 ```
 
+Read the phone's screen first. If it shows text, stop: the log is right there,
+and the interesting lines are `dwc3`, `usb_1`, `hsphy`, `typec`, `regulator`
+and `pstore`. If it stays black, time the reboot from power-on:
+
 | Interval | Meaning | Next step |
 | --- | --- | --- |
-| ~20 s | No `/sys/class/udc`, all three PHY rails registered | Chain dies above the regulators: look at gcc/GDSC/clocks. Try `dr_mode = "peripheral"` (no role switch) to remove TCPM from the picture. |
-| ~30 s | No `/sys/class/udc`, at least one rail missing | `regulators-0` is not registering. Add the full pm8150 regulator tree (see below) and retry. |
-| ~40 s | UDC exists, no `/dev/ttyGS0` | Gadget bind failed — configfs/composite, not PHY. |
-| ~50 s | `/dev/ttyGS0` exists, UDC state not attached | Pull-up refused: role or PHY power. This is where `select-utmi`, QMP PHY and TCPM matter. |
-| never | Console up | M0 done. |
+| ~80 s | No `/sys/class/udc`, all three PHY rails registered | Chain dies above the regulators: gcc/GDSC/clocks. Try `dr_mode = "peripheral"` (no role switch) to remove TCPM from the picture. |
+| ~90 s | No `/sys/class/udc`, at least one rail missing | `regulators-0` is not registering. Copy elish's full pm8150 regulator tree. |
+| ~100 s | UDC exists, no `/dev/ttyGS0` | Gadget bind failed — configfs/composite, not PHY. |
+| ~110 s | `/dev/ttyGS0` exists, UDC state not attached | Pull-up refused: role or PHY power. `select-utmi`, QMP PHY and TCPM matter here. |
 
-~15 s means a kernel panic (`panic=10` + boot), not one of the codes.
+(60 s dwell + 10 s boot + the code itself. ~15 s still means a panic.)
+
+Older fallback: `out/t17-ladder.img`, same ladder without the dwell and without
+the screen.
 
 ## Candidate fixes to try after the ladder
 
