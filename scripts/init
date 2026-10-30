@@ -1,17 +1,23 @@
 #!/bin/sh
 # initramfs /init for M0: bring up a USB CDC-ACM gadget and hand a shell to it.
 #
-# There is no UART on this phone, so this is the only console we have.
-#
-# Two rules, both learned the hard way:
+# There is no UART on this phone, so this is the only console we have. Two
+# rules, both learned the hard way:
 #
 #  1. PID 1 must never exit. If it does the kernel panics with "Attempted to
 #     kill init" and reboot-loops, which is exactly as blind as a hang.
-#  2. If userspace is alive but USB never appears, say so out loud. The only
-#     channel left is the phone itself: power off after a minute. A bootloop
-#     that repeats every ~15 s then means "died before /init", while a phone
-#     that switches itself off after ~60 s means "userspace ran, USB is what is
-#     missing". Different delays, no console needed.
+#  2. When there is no console, the phone itself has to report. It does that
+#     with the only output it has - the time between reboots.
+#
+# Timing codes (watch the Xiaomi logo and count the seconds):
+#
+#   ~20 s   dwc3 never probed: /sys/class/udc is empty
+#   ~40 s   UDC exists but the gadget did not bind / no /dev/ttyGS0
+#   never   the gadget is up; the phone stays on because USB should now be
+#           visible on the host
+#
+# A panic before /init looks different again: about 15 s, because panic=10 adds
+# ten seconds to a normal boot.
 
 export PATH=/bin
 
@@ -31,8 +37,8 @@ gadget_create() {
 	echo 0x0104 > "$G/idProduct"
 
 	mkdir -p "$G/strings/0x409"
-	echo umi               > "$G/strings/0x409/serialnumber"
-	echo umi-nethunter     > "$G/strings/0x409/manufacturer"
+	echo umi                > "$G/strings/0x409/serialnumber"
+	echo umi-nethunter      > "$G/strings/0x409/manufacturer"
 	echo "umi debug console" > "$G/strings/0x409/product"
 
 	mkdir -p "$G/configs/c.1/strings/0x409"
@@ -51,18 +57,24 @@ gadget_bind() {
 	echo "$udc" > "$G/UDC"
 }
 
+die_in() {
+	# $1 = seconds from now. Reboot, and if the syscall is refused, use sysrq.
+	echo "umi-m0: rebooting in $1 s (diagnostic code)" > /dev/kmsg 2>/dev/null
+	sleep "$1"
+	reboot -f
+	echo b > /proc/sysrq-trigger
+	sleep 10
+}
+
 n=0
-announced=
+udc_seen=0
 
 while true; do
 	n=$((n + 1))
 
 	if gadget_bind && [ -c /dev/ttyGS0 ]; then
-		if [ -z "$announced" ]; then
-			announced=1
-			echo "umi-m0: console up on $(cat "$G/UDC" 2>/dev/null)" \
-				> /dev/kmsg 2>/dev/null
-		fi
+		echo "umi-m0: console up on $(cat "$G/UDC" 2>/dev/null)" \
+			> /dev/kmsg 2>/dev/null
 		# Child, not exec: if the host closes the port the shell exits and
 		# the loop just spawns a new one.
 		setsid sh -c '
@@ -74,15 +86,17 @@ while true; do
 			echo
 			exec sh
 		' </dev/ttyGS0 >/dev/ttyGS0 2>&1
+		continue
+	fi
+
+	if [ -n "$(ls /sys/class/udc 2>/dev/null)" ]; then
+		udc_seen=1
+	fi
+
+	if [ "$udc_seen" = 1 ]; then
+		[ "$n" -ge 13 ] && die_in 1      # ~40 s from start
 	else
-		# 20 tries x 3 s = 60 s. If there is still no UDC by then, USB is
-		# not coming up on its own: power off, which is a signal we can
-		# actually see.
-		if [ "$n" -ge 20 ]; then
-			echo "umi-m0: no UDC after 60s, powering off" > /dev/kmsg 2>/dev/null
-			sleep 2
-			poweroff -f
-		fi
+		[ "$n" -ge 7 ] && die_in 1       # ~21 s from start
 	fi
 
 	sleep 3

@@ -18,7 +18,6 @@ Pure Python on purpose: the build host has no cpio, and the payloads are tiny.
 import gzip
 import io
 import os
-import stat
 import sys
 import time
 
@@ -41,10 +40,10 @@ def main():
     mtime = int(time.time())
     body = bytearray()
     for ino, src in enumerate(srcs, start=1):
-        st = os.stat(src)
-        mode = stat.S_IMODE(st.st_mode) | stat.S_IFREG
-        with open(src, "rb") as f:
-            body += newc("/" + os.path.basename(src), mode, f.read(), ino, mtime)
+        # 0755 for everything: these are initramfs files (scripts), and a
+        # non-executable /init is a panic, not an error message.
+        body += newc("/" + os.path.basename(src), 0o100755, open(src, "rb").read(),
+                     ino, mtime)
     body += newc("TRAILER!!!", 0, b"", len(srcs) + 1, mtime)
 
     raw = io.BytesIO()

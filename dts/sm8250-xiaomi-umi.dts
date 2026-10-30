@@ -3,9 +3,13 @@
  * Xiaomi Mi 10 (umi) - SM8250
  *
  * M0 bring-up tree: enough to boot a mainline kernel into an initramfs with a
- * USB CDC-ACM console, plus a simple-framebuffer on the bootloader's splash so
- * that early kernel messages are visible on the panel. No storage, no PMIC
- * regulators - everything the bootloader leaves powered stays powered.
+ * USB CDC-ACM console. No storage, no display: the panel is a command-mode DSI
+ * AMOLED that keeps showing its own GRAM until a DSI driver feeds it, so there
+ * is nothing to put a framebuffer on.
+ *
+ * The only power management here is the three USB HS PHY rails, because the
+ * bootloader switches USB off before handing over and the PHY cannot present
+ * itself on the bus without them.
  *
  * Derived from mainline sm8250.dtsi / sm8250-xiaomi-elish-common.dtsi and the
  * downstream LineageOS device tree for umi.
@@ -15,6 +19,7 @@
 
 #include <dt-bindings/gpio/gpio.h>
 #include <dt-bindings/interrupt-controller/arm-gic.h>
+#include <dt-bindings/regulator/qcom,rpmh-regulator.h>
 #include "sm8250.dtsi"
 
 / {
@@ -41,8 +46,8 @@
 };
 
 /*
- * USB1 in peripheral mode: this is the console. The bootloader has already set
- * up the PHY rails, so only the HS PHY is described (no QMP/USB3).
+ * USB1 in peripheral mode: this is the console. Only the HS PHY is described
+ * (no QMP/USB3) - USB 2.0 is all a console needs.
  *
  * No simple-framebuffer here on purpose: the panel is a command-mode DSI AMOLED
  * and keeps showing whatever is in its own GRAM until a DSI driver feeds it, so
@@ -63,40 +68,52 @@
 
 &usb_1_hsphy {
 	status = "okay";
-	vdda-pll-supply = <&vreg_usb_hs_pll>;
-	vdda18-supply = <&vreg_usb_hs_1p8>;
-	vdda33-supply = <&vreg_usb_hs_3p1>;
+	vdda-pll-supply = <&vreg_l5a_0p88>;
+	vdda18-supply = <&vreg_l12a_1p8>;
+	vdda33-supply = <&vreg_l2a_3p1>;
 };
 
 /*
- * phy-qcom-snps-femto-v2 requests all three supplies unconditionally
- * (devm_regulator_bulk_get), so they must exist in the tree even though the
- * bootloader already left the real PMIC LDOs on: PM8150 L5A (0.88 V),
- * L12A (1.8 V) and L2A (3.1 V). Fixed always-on stand-ins are enough for M0;
- * the real pm8150 regulators arrive with the M4 power work.
+ * The three USB HS PHY rails, as real RPMh regulators on the PM8150.
+ *
+ * They started life as regulator-fixed stand-ins, which was the wrong answer:
+ * a fixed regulator "enables" successfully and drives nothing. dwc3 then
+ * reported a UDC, configfs bound the gadget, /dev/ttyGS0 appeared - and the
+ * phone never showed up on the bus, because the PHY itself had no power. The
+ * bootloader switches USB off before jumping to the kernel, so somebody has to
+ * switch these LDOs back on, and only RPMh can.
+ *
+ * Voltages are the PHY's specified ones: 0.88 V for the PLL, 1.8 V and 3.1 V
+ * (PM8150 L5A, L12A, L2A). regulator-always-on is deliberate - at M0 nothing
+ * else manages power, and a rail that quietly goes away costs a boot loop.
  */
-/ {
-	vreg_usb_hs_pll: regulator-usb-hs-pll {
-		compatible = "regulator-fixed";
-		regulator-name = "usb_hs_pll_0p88";
-		regulator-min-microvolt = <880000>;
-		regulator-max-microvolt = <880000>;
-		regulator-always-on;
-	};
+&apps_rsc {
+	regulators-0 {
+		compatible = "qcom,pm8150-rpmh-regulators";
+		qcom,pmic-id = "a";
 
-	vreg_usb_hs_1p8: regulator-usb-hs-1p8 {
-		compatible = "regulator-fixed";
-		regulator-name = "usb_hs_1p8";
-		regulator-min-microvolt = <1800000>;
-		regulator-max-microvolt = <1800000>;
-		regulator-always-on;
-	};
+		vreg_l2a_3p1: ldo2 {
+			regulator-name = "vreg_l2a_3p1";
+			regulator-min-microvolt = <3072000>;
+			regulator-max-microvolt = <3072000>;
+			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
+			regulator-always-on;
+		};
 
-	vreg_usb_hs_3p1: regulator-usb-hs-3p1 {
-		compatible = "regulator-fixed";
-		regulator-name = "usb_hs_3p1";
-		regulator-min-microvolt = <3100000>;
-		regulator-max-microvolt = <3100000>;
-		regulator-always-on;
+		vreg_l5a_0p88: ldo5 {
+			regulator-name = "vreg_l5a_0p88";
+			regulator-min-microvolt = <880000>;
+			regulator-max-microvolt = <880000>;
+			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
+			regulator-always-on;
+		};
+
+		vreg_l12a_1p8: ldo12 {
+			regulator-name = "vreg_l12a_1p8";
+			regulator-min-microvolt = <1800000>;
+			regulator-max-microvolt = <1800000>;
+			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
+			regulator-always-on;
+		};
 	};
 };

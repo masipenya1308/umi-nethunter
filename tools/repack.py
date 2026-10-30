@@ -93,8 +93,10 @@ def main():
     struct.pack_into("<I", header, OFF_RECOVERY_DTBO_SIZE, len(rdtbo))
     struct.pack_into("<I", header, OFF_HEADER_SIZE, header_size)
     struct.pack_into("<I", header, OFF_DTB_SIZE, len(dtb))
-    header[OFF_ID:OFF_ID + 32] = hashlib.sha1(
+    # sha1 goes in the first 20 bytes of the 32 byte id field; the rest stays 0.
+    header[OFF_ID:OFF_ID + 20] = hashlib.sha1(
         kernel + ramdisk + second + rdtbo + dtb).digest()
+    header[OFF_ID + 20:OFF_ID + 32] = b"\0" * 12
 
     with open(args.out, "wb") as f:
         f.write(header)
